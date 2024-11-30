@@ -22,12 +22,12 @@ class DRIVER_MONITOR_SETTINGS:
   def __init__(self):
     self._DT_DMON = DT_DMON
     # ref (page15-16): https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:42018X1947&rid=2
-    self._AWARENESS_TIME = 30. # passive wheeltouch total timeout
-    self._AWARENESS_PRE_TIME_TILL_TERMINAL = 15.
-    self._AWARENESS_PROMPT_TIME_TILL_TERMINAL = 600000.
-    self._DISTRACTED_TIME = 1100000. # active monitoring total timeout
-    self._DISTRACTED_PRE_TIME_TILL_TERMINAL = 8000000.
-    self._DISTRACTED_PROMPT_TIME_TILL_TERMINAL = 600000.
+    self._AWARENESS_TIME = 30000. # passive wheeltouch total timeout
+    self._AWARENESS_PRE_TIME_TILL_TERMINAL = 15000.
+    self._AWARENESS_PROMPT_TIME_TILL_TERMINAL = 6000000.
+    self._DISTRACTED_TIME = 11000000. # active monitoring total timeout
+    self._DISTRACTED_PRE_TIME_TILL_TERMINAL = 80000000.
+    self._DISTRACTED_PROMPT_TIME_TILL_TERMINAL = 6000000.
 
     self._FACE_THRESHOLD = 0.7
     self._EYE_THRESHOLD = 0.65
@@ -229,9 +229,7 @@ class DriverMonitoring:
                                                     self.settings._YAW_MIN_OFFSET), self.settings._YAW_MAX_OFFSET)
     pitch_error = 0 if pitch_error > 0 else abs(pitch_error) # no positive pitch limit
     yaw_error = abs(yaw_error)
-    if pitch_error > (self.settings._POSE_PITCH_THRESHOLD*self.pose.cfactor_pitch if self.pose.calibrated else self.settings._PITCH_NATURAL_THRESHOLD) or \
-       yaw_error > self.settings._POSE_YAW_THRESHOLD*self.pose.cfactor_yaw:
-      distracted_types.append(DistractedType.DISTRACTED_POSE)
+
 
     if (self.blink.left + self.blink.right)*0.5 > self.settings._BLINK_THRESHOLD:
       distracted_types.append(DistractedType.DISTRACTED_BLINK)
@@ -265,7 +263,7 @@ class DriverMonitoring:
                                     driver_data.readyProb, driver_data.notReadyProb)):
       return
 
-    self.face_detected = driver_data.faceProb > self.settings._FACE_THRESHOLD
+    self.face_detected = True
     self.pose.roll, self.pose.pitch, self.pose.yaw = face_orientation_from_net(driver_data.faceOrientation, driver_data.facePosition, cal_rpy)
     if self.wheel_on_right:
       self.pose.yaw *= -1
@@ -300,20 +298,13 @@ class DriverMonitoring:
     self.ee1_calibrated = self.ee1_offseter.filtered_stat.n > self.settings._POSE_OFFSET_MIN_COUNT
     self.ee2_calibrated = self.ee2_offseter.filtered_stat.n > self.settings._POSE_OFFSET_MIN_COUNT
 
-    self.is_model_uncertain = self.hi_stds > self.settings._HI_STD_FALLBACK_TIME
-    self._set_timers(self.face_detected and not self.is_model_uncertain)
-    if self.face_detected and not self.pose.low_std and not self.driver_distracted:
-      self.hi_stds += 1
-    elif self.face_detected and self.pose.low_std:
-      self.hi_stds = 0
+    self.is_model_uncertain =False
+    self._set_timers(self.face_detected)
+
 
   def _update_events(self, driver_engaged, op_engaged, standstill, wrong_gear, car_speed, steering_wheel_engaged):
     self._reset_events()
-    # Block engaging after max number of distrations or when alert active
-    if self.terminal_alert_cnt >= self.settings._MAX_TERMINAL_ALERTS or \
-       self.terminal_time >= self.settings._MAX_TERMINAL_DURATION or \
-       self.always_on and self.awareness <= self.threshold_prompt:
-      self.current_events.add(EventName.tooDistracted)
+
 
     always_on_valid = self.always_on and not wrong_gear
 
@@ -359,21 +350,7 @@ class DriverMonitoring:
         self.awareness = max(self.awareness - self.step_change, -0.1)
 
     alert = None
-    if self.awareness <= 0.:
-      # terminal red alert: disengagement required
-      alert = EventName.driverDistracted if self.active_monitoring_mode else EventName.driverUnresponsive
-      self.terminal_time += 1
-      if awareness_prev > 0.:
-        self.terminal_alert_cnt += 1
-    elif self.awareness <= self.threshold_prompt:
-      # prompt orange alert
-      alert = EventName.promptDriverDistracted if self.active_monitoring_mode else EventName.promptDriverUnresponsive
-    elif self.awareness <= self.threshold_pre:
-      # pre green alert
-      alert = EventName.preDriverDistracted if self.active_monitoring_mode else EventName.preDriverUnresponsive
-
-    if alert is not None:
-      self.current_events.add(alert)
+   
 
 
   def get_state_packet(self, valid=True):
